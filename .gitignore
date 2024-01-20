@@ -1,0 +1,23 @@
+# Node modules
+node_modules/
+
+# TypeScript output
+dist/
+
+# Visual Studio Code configuration
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# npm-debug.log
+npm-debug.log
+
+# Yarn lock file
+yarn.lock
+
+# .env file (contains sensitive information)
+.env
