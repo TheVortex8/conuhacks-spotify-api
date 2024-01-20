@@ -21,3 +21,5 @@ yarn.lock
 
 # .env file (contains sensitive information)
 .env
+
+token.json

@@ -1,93 +1,81 @@
 // src/app.ts
 import express, { Request, Response } from 'express';
 import SpotifyWebApi from 'spotify-web-api-node';
-
+import fs from 'fs';
+import token from '../token.json'
+import cors from 'cors';
 require('dotenv').config();
 
-const scopes = [
-  'ugc-image-upload',
-  'user-read-playback-state',
-  'user-modify-playback-state',
-  'user-read-currently-playing',
-  'streaming',
-  'app-remote-control',
-  'user-read-email',
-  'user-read-private',
-  'playlist-read-collaborative',
-  'playlist-modify-public',
-  'playlist-read-private',
-  'playlist-modify-private',
-  'user-library-modify',
-  'user-library-read',
-  'user-top-read',
-  'user-read-playback-position',
-  'user-read-recently-played',
-  'user-follow-read',
-  'user-follow-modify'
-];
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(cors())
+const PORT = 3000;
+const tokenFilePath = 'C:/Users/amine/Documents/Projects/conuhacks-spotimood/spotify-api/token.json';
 
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID || '',
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET || '',
-  redirectUri: 'http://localhost:3000/callback',
+  redirectUri: 'http://172.30.177.254:3000/callback',
 });
 
 app.use(express.json());
+app.use((req, res, next) => {
+  const now = new Date();
+  const timestamp = now.toISOString();
+  console.log(`NEW REQUEST: [${timestamp}] ${req.method} ${req.originalUrl}`);
+  next();
+})
 
 interface Playlist {
   songs: string[];
   name: string;
 }
-app.get('/generatePlaylist', (req, res) => {
-  let songsRequests, playlistName;
-  if(Object.keys(req.body).length !== 0) {
-    songsRequests = req.body.songs as string[];
-    playlistName = req.body.name as string;
-  } else {
-    songsRequests = (req.query.songs as string).split(",");
-    playlistName = req.query.name as string;
-  }
 
-  const playlist = {
-    songs: songsRequests,
-    name: playlistName
-  };
-
-  if (!songsRequests || !songsRequests.length || !playlistName) {
-    return res.status(400).json({ error: 'Please provide an array of objects with "songName" and "artist" properties in the body' });
-  }
-
-  res.redirect(spotifyApi.createAuthorizeURL(scopes, JSON.stringify(playlist)));
-});
-
-app.get('/callback', async (req, res) => {
+app.get('/clear', async (req, res) => {
   try {
-    const error = req.query.error;
-    const code = req.query.code as string;
-    const playlist: Playlist = JSON.parse(req.query.state as string);
+    // Step 1: Retrieve User Playlists
+    await setAuth();
+    const playlistsResponse = await spotifyApi.getUserPlaylists();
+    const playlists = playlistsResponse.body.items;
 
-    if (error) {
-      console.error('Callback Error:', error);
-      res.send(`Callback Error: ${error}`);
-      return;
+    // Step 2: Delete Each Playlist
+    for (const playlist of playlists) {
+      const tracksResponse = await spotifyApi.getPlaylistTracks(playlist.id);
+      const tracks = tracksResponse.body.items.map((track) => ({ uri: track.track.uri }));
+
+      await spotifyApi.removeTracksFromPlaylist(playlist.id, tracks);
+      await spotifyApi.unfollowPlaylist(playlist.id);
     }
 
-    const data = await spotifyApi.authorizationCodeGrant(code);
-    const access_token = data.body['access_token'];
-    const refresh_token = data.body['refresh_token'];
-    const expires_in = data.body['expires_in'];
+    const message = `${playlists.length} playlists deleted successfully.`
+    console.log(message);
+    res.json({ message });
+  } catch (error) {
+    console.error('Error deleting playlists:', error.message);
+    res.send(`Error deleting playlist: ${JSON.stringify(error)}`);
+  }
+})
 
-    spotifyApi.setAccessToken(access_token);
-    spotifyApi.setRefreshToken(refresh_token);
+app.post('/generatePlaylist', async (req, res) => {
+  try {
+    await setAuth();
 
-    console.log('access_token:', access_token);
-    console.log('refresh_token:', refresh_token);
+    let songsRequests: string[], playlistName: string;
 
-    console.log(
-      `Sucessfully retreived access token. Expires in ${expires_in} s.`
-    );
+    if (Object.keys(req.body).length !== 0) {
+      songsRequests = req.body.songs as string[];
+      playlistName = req.body.name as string;
+    }
+
+    const playlist: Playlist = {
+      songs: songsRequests,
+      name: playlistName
+    };
+
+    if (!songsRequests || !songsRequests.length || !playlistName) {
+      console.log("Missing body")
+      return res.status(400).json({ error: 'Please provide an array of objects with "songName" and "artist" properties in the body' });
+    }
+
     const tracksPromises = playlist.songs.map(async (song) => {
       const searchResponse = await spotifyApi.searchTracks(song, { limit: 1 });
 
@@ -104,24 +92,45 @@ app.get('/callback', async (req, res) => {
 
     // Create a playlist
     const createPlaylistResponse = await spotifyApi.createPlaylist(playlist.name, {
-      public: false,
+      public: true,
     });
 
     const playlistId = createPlaylistResponse.body.id;
 
     // Add tracks to the playlist
-    const addTracksResponse = await spotifyApi.addTracksToPlaylist(playlistId, validTracks.map((track) => `spotify:track:${track.spotifyId}`));
+    await spotifyApi.addTracksToPlaylist(playlistId, validTracks.map((track) => `spotify:track:${track.spotifyId}`));
 
     // Get the playlist URL
     const playlistUrl = `https://open.spotify.com/playlist/${playlistId}`;
+    console.log("Playlist sucessfully generated:", playlistUrl)
 
-    res.json({ playlistId, playlistUrl, addedTracks: addTracksResponse.body.snapshot_id });
+    res.json({ playlistUrl });
   } catch (error) {
-    console.error('Error getting Tokens:', error);
-    res.send(`Error getting Tokens: ${error}`);
+    console.error('Error:', JSON.stringify(error));
+    res.send(`Error: ${JSON.stringify(error)}`);
   };
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+app.listen(PORT, "172.30.177.254", () => {
+  console.log(`Server is running on http://172.30.177.254:${PORT}`);
 });
+async function setAuth() {
+  spotifyApi.setAccessToken(token.access_token);
+  spotifyApi.setRefreshToken(token.refresh_token);
+
+  try {
+    // Testing if access token works
+    await spotifyApi.getMe();
+  } catch (err) {
+    const { body } = await spotifyApi.refreshAccessToken();
+    spotifyApi.setAccessToken(body.access_token);
+    spotifyApi.setRefreshToken(body.refresh_token);
+    const tokenObject = {
+      ...body,
+      refresh_token: token.refresh_token
+    };
+    fs.writeFileSync(tokenFilePath, JSON.stringify(tokenObject, null, 2), { encoding: 'utf-8', flag: 'w' });
+    console.log("Token refreshed!")
+  }
+}
+
