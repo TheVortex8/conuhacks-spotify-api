@@ -9,12 +9,12 @@ require('dotenv').config();
 const app = express();
 app.use(cors())
 const PORT = 3000;
-const tokenFilePath = 'C:/Users/amine/Documents/Projects/conuhacks-spotimood/spotify-api/token.json';
+const tokenFilePath = './token.json';
+const ip = "192.168.68.147";
 
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID || '',
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET || '',
-  redirectUri: 'http://172.30.177.254:3000/callback',
 });
 
 app.use(express.json());
@@ -73,7 +73,7 @@ app.post('/generatePlaylist', async (req, res) => {
 
     if (!songsRequests || !songsRequests.length || !playlistName) {
       console.log("Missing body")
-      return res.status(400).json({ error: 'Please provide an array of objects with "songName" and "artist" properties in the body' });
+      return res.status(400).json({ error: 'Please provide an array of objects with "name" and "songs" properties in the body' });
     }
 
     const tracksPromises = playlist.songs.map(async (song) => {
@@ -104,15 +104,15 @@ app.post('/generatePlaylist', async (req, res) => {
     const playlistUrl = `https://open.spotify.com/playlist/${playlistId}`;
     console.log("Playlist sucessfully generated:", playlistUrl)
 
-    res.json({ playlistUrl });
+    res.json({ playlistUrl, uris: createPlaylistResponse.body.uri });
   } catch (error) {
     console.error('Error:', JSON.stringify(error));
     res.send(`Error: ${JSON.stringify(error)}`);
   };
 });
 
-app.listen(PORT, "172.30.177.254", () => {
-  console.log(`Server is running on http://172.30.177.254:${PORT}`);
+app.listen(PORT, ip, () => {
+  console.log(`Server is running on http://${ip}:${PORT}`);
 });
 async function setAuth() {
   spotifyApi.setAccessToken(token.access_token);
